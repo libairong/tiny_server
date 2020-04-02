@@ -1,0 +1,5 @@
+*.html
+build
+.vscode
+test.c
+test*
