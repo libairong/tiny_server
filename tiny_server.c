@@ -126,11 +126,19 @@ static void host_list_init()
     close(fd);
 }
 
-static void parse_host(char *uri, char *host)
+static void parse_host(char *host, char *uri)
 {
     fprintf(stdout, "request host:%s\n", host);
     char *s, path[STRING_SIZE];
     s = strstr(g_host_binding_list, host);
+    if (s != NULL && s != g_host_binding_list)
+        do {
+            s = index(s, '\n');
+            if (!s)
+                break;
+            s = strstr(s+1, host);
+        } while (*(s-1) != '\n');
+    
     if (s == NULL) {
         sprintf(path, "_site%s", uri);
         sprintf(uri, "%s", path);
@@ -239,9 +247,9 @@ static int static_server(int sock, char *uri, char *filetype)
             close(fd);
             return ret;
         }
-        ret = send_file(fd, filesize, sock);
+        ret += send_file(fd, filesize, sock);
         close(fd);
-        fprintf(stdout, "my response:\n%s\n", response_head); // dbg msg
+        fprintf(stdout, "my response(%d Byte):\n%s\n", ret, response_head); // dbg msg
         return ret;
     }
 }
@@ -254,9 +262,9 @@ static int handle_http_request(int sock, char * msg)
 
     sscanf(msg, "%s %s HTTP%*[^H]Host: %s\n", method, uri, host);
     // printf("method:%s\nuri:%s\nhost:%s\n", method, uri, host); // dbg msg
-    if (!strcmp(method, "GET") || !strcmp(method, "OPTIONS")|| !strcmp(method, "HEAD")|| !strcmp(method, "PUT")) {  /* only support GET */
+    if (!strcmp(method, "GET")) {  /* only support GET */
 #ifdef MULTI_CNAME_SERVICE
-        parse_host(uri, host);
+        parse_host(host, uri);
 #endif // MULTI_CNAME_SERVICE
         if ( parse_http_uri(uri, filetype) ) { /* dynamic request */
             return -1;
@@ -275,7 +283,7 @@ static int handle_http_request(int sock, char * msg)
 
 static int handle_message(int fd, char * msg)
 {
-    fprintf(stdout, "handling message: ");
+    fprintf(stdout, "handling message... ");
     char method[STRING_SIZE], uri[STRING_SIZE], version[STRING_SIZE], buf[STRING_SIZE];
     sscanf(msg, "%s %s %s", method, uri, version);
     printf("%s %s %s...\n", method, uri, version);
