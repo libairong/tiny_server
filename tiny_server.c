@@ -202,9 +202,9 @@ static void http_uri_decode(char *uri)
  */
 static int parse_http_uri(char *uri, char *filetype)
 {
-    const char *type[] = {".html",".css",".js",".json",".gif",".png",".jpg",".ico",".webp"};
+    const char *type[] = {".html",".css",".js",".json",".gif",".png",".jpg",".ico",".webp",".pdf"};
     const char *http_type_table[] = {"text/html","text/css","application/js","application/json",
-        "image/gif","image/png","image/jpeg","image/ico","image/webp","text/plain"};
+        "image/gif","image/png","image/jpeg","image/ico","image/webp","application/pdf","text/plain"};
         
     http_uri_decode(uri);
     if (!strcmp(uri, "/")) {
@@ -212,7 +212,7 @@ static int parse_http_uri(char *uri, char *filetype)
         sprintf(filetype, "text/html");
         return 0;
     }
-    fprintf(stdout, "parsing uri<%d>: %s\n", strlen(uri)+1, uri); // dbg msg
+    fprintf(stdout, "parsing uri<%d>: %s\n", strlen(uri), uri); // dbg msg
     if (security_check(uri) < 0) {
         perror("Unsafe uri request.\n");
         return -1;
@@ -222,7 +222,7 @@ static int parse_http_uri(char *uri, char *filetype)
         uri[strlen(uri) - 1] = '\0';
 #else
     sprintf(uri,"%s", uri+1);
-#endif // MULTI_CNAME_SERVICE
+#endif
     struct stat buf;
     if (lstat(uri, &buf) < 0)
         return -1;
@@ -241,12 +241,12 @@ static int parse_http_uri(char *uri, char *filetype)
         strcpy(filetype, "text/plain");
         return 0;
     }
-    for (size_t i = 0; i < 9; i++) {
+    for (size_t i = 0; i < 10; i++) {
         if (strstr(p, type[i])) {
             strcpy(filetype, http_type_table[i]);
             break;
         }
-        if (i == 9) strcpy(filetype, "text/plain");
+        if (i == 10) strcpy(filetype, "text/plain");
     }
     printf("filetype: %s\n", filetype); // dbg msg
     return 0;
