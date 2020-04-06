@@ -21,16 +21,20 @@
 #include <signal.h>
 #include <pthread.h>
 #include <sys/syscall.h>
+#include <locale.h>
+
+#define MULTI_CNAME_SERVICE
+
 
 #define STRING_SIZE 1024
 #define MAX_LISTEN  128  // n <= 128
 
-#define MULTI_CNAME_SERVICE
 
 static const char response_ok_head[] = "\
 HTTP/1.0 200 OK\r\n\
 Server: Tiny Web Server\r\n\
 Connection: keep-alive\r\n\
+Cache-control: max-age=500\r\n\
 Access-Control-Allow-Origin: *\r\n\
 Access-Control-Allow-Methods: *\r\n\
 ";
@@ -166,8 +170,33 @@ static int security_check(char *p)
     return 0;
 }
 
-/* The function assumpts that there's 1024 Byte to store the URI.
- * Dynamic request - return 1
+static void http_uri_decode(char *uri)
+{
+    if (uri == NULL) return;
+    printf("http_uri_decode()%d:%s\n", strlen(uri), uri); // dbg msg
+
+    char tmp[STRING_SIZE], *p1 = uri, *p2 = tmp;
+    memset(tmp, 0, sizeof(tmp));
+    do {
+        if (*p1 == '%') {
+            if (*(p1+1) < 0x41)
+                *p2 = (*(p1+1) - 0x30)<<4;
+            else
+                *p2 = (*(p1+1) - 55)<<4;
+            if (*(p1+2) < 0x41)
+                *p2 += (*(p1+2) - 0x30);
+            else
+                *p2 += (*(p1+2) - 55);
+            p1 += 3; p2++;
+        } else {
+            *p2++ = *p1++;
+        }
+    } while (*p1 != '\0');
+    sprintf(uri, "%s", tmp);
+    printf("after http_uri_decode()%d:%s\n", strlen(uri), uri); // dbg msg
+}
+
+/* Dynamic request - return 1
  * Static request - return 0
  * uri error     - return -1
  */
@@ -177,6 +206,7 @@ static int parse_http_uri(char *uri, char *filetype)
     const char *http_type_table[] = {"text/html","text/css","application/js","application/json",
         "image/gif","image/png","image/jpeg","image/ico","image/webp","text/plain"};
         
+    http_uri_decode(uri);
     if (!strcmp(uri, "/")) {
         sprintf(uri, "index.html");
         sprintf(filetype, "text/html");
@@ -331,6 +361,7 @@ static void * thread_handling_new_client(void * arg)
 
 int main(int argc, char const *argv[])
 {
+    printf("%s\n", setlocale(LC_CTYPE, "en_US.UTF-8"));
     if (argc != 2) {
         fprintf(stderr, "usage: %s <port>\n", argv[0]);
         exit(1);
