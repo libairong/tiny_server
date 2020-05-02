@@ -170,10 +170,10 @@ static int security_check(char *p)
     return 0;
 }
 
-static void http_uri_decode(char *uri)
+static void http_uri_decode_to_utf8(char *uri)
 {
     if (uri == NULL) return;
-    printf("http_uri_decode()%d:%s\n", strlen(uri), uri); // dbg msg
+    printf("http_uri_decode_to_utf8()%d:%s\n", strlen(uri), uri); // dbg msg
 
     char tmp[STRING_SIZE], *p1 = uri, *p2 = tmp;
     memset(tmp, 0, sizeof(tmp));
@@ -193,7 +193,7 @@ static void http_uri_decode(char *uri)
         }
     } while (*p1 != '\0');
     sprintf(uri, "%s", tmp);
-    printf("after http_uri_decode()%d:%s\n", strlen(uri), uri); // dbg msg
+    printf("after http_uri_decode_to_utf8()%d:%s\n", strlen(uri), uri); // dbg msg
 }
 
 /* Dynamic request - return 1
@@ -206,13 +206,15 @@ static int parse_http_uri(char *uri, char *filetype)
     const char *http_type_table[] = {"text/html","text/css","application/js","application/json",
         "image/gif","image/png","image/jpeg","image/ico","image/webp","application/pdf","text/plain"};
         
-    http_uri_decode(uri);
+    http_uri_decode_to_utf8(uri);
     if (!strcmp(uri, "/")) {
         sprintf(uri, "index.html");
         sprintf(filetype, "text/html");
         return 0;
     }
     fprintf(stdout, "parsing uri<%d>: %s\n", strlen(uri), uri); // dbg msg
+    if (strchr(uri, '?') != NULL) /* dynamic req */
+        return 1;
     if (security_check(uri) < 0) {
         perror("Unsafe uri request.\n");
         return -1;
@@ -252,8 +254,28 @@ static int parse_http_uri(char *uri, char *filetype)
     return 0;
 }
 
-static int dynamic_uri(char *uri)
+static int dynamic_uri(int sock, char *uri)
 {
+    char *p = strchr(uri, '?');
+    if (p == NULL)
+        return -1;
+    char req[64];
+    char path[64];
+    memset(req, 0, sizeof(req));
+    memset(path, 0, sizeof(path));
+    if (sscanf(uri, "%*[^d]iot?%s", req) == -1)
+        return -1;
+    if (!strcmp(req, "sensor")) {
+        sscanf(uri, "%siot", path);
+        sprintf(path, "%siot.db", path);
+        int fd = open(path, O_RDONLY, S_IREAD);
+        if (fd < 0) {
+            fprintf(stderr, "%s", path);
+            return -1;
+        }
+        int filesize = lseek(fd, 0, SEEK_END);
+        return send_file(fd, filesize, sock);
+    }
     return 0;
 }
 
@@ -269,7 +291,7 @@ static int static_server(int sock, char *uri, char *filetype)
     }
     else {
         filesize = lseek(fd, 0, SEEK_END);
-        bzero(response_head, sizeof(response_head));
+        memset(response_head, 0, sizeof(response_head));
         sprintf(response_head, response_ok_head);
         sprintf(response_head, "%sContent-type: %s;charset=UTF-8\r\n", response_head, filetype);
         sprintf(response_head, "%sContent-length: %d\r\n\r\n", response_head, filesize);
@@ -297,7 +319,7 @@ static int handle_http_request(int sock, char * msg)
         parse_host(host, uri);
 #endif // MULTI_CNAME_SERVICE
         if ( parse_http_uri(uri, filetype) ) { /* dynamic request */
-            return -1;
+            return dynamic_uri(sock, uri);
         }
         else { /* static request */
             return static_server(sock, uri, filetype);
