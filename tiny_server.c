@@ -1,5 +1,5 @@
 /* -----------------------
- * update time: Apr.02 2020
+ * update time: May.02 2020
  * author: whqee
  * e-mail: whqee@qq.com
  * -----------------------*/
@@ -34,7 +34,6 @@ static const char response_ok_head[] = "\
 HTTP/1.0 200 OK\r\n\
 Server: Tiny Web Server\r\n\
 Connection: keep-alive\r\n\
-Cache-control: max-age=500\r\n\
 Access-Control-Allow-Origin: *\r\n\
 Access-Control-Allow-Methods: *\r\n\
 ";
@@ -146,7 +145,7 @@ static void parse_host(char *host, char *uri)
     if (s == NULL) {
         sprintf(path, "_site%s", uri);
         sprintf(uri, "%s", path);
-        fprintf(stdout, "domain not matching, run default response\n"); // dbg msg
+        fprintf(stderr, "domain not matching, run default response\n"); // dbg msg
         return;
     }
     sscanf(s, "%*[^ ] %s\n", path);
@@ -254,29 +253,78 @@ static int parse_http_uri(char *uri, char *filetype)
     return 0;
 }
 
+
+static int order_reply_to_sensor = 0;
+static char msg_reply_to_sensor[16];
+static int sensor_pushed = 0;
+
 static int dynamic_uri(int sock, char *uri)
 {
+    int ret;
+    printf("recv dynamic req.\n");
     char *p = strchr(uri, '?');
     if (p == NULL)
         return -1;
-    char req[64];
-    char path[64];
+    char req[64], path[64], response_head[STRING_SIZE];
     memset(req, 0, sizeof(req));
     memset(path, 0, sizeof(path));
-    if (sscanf(uri, "%*[^d]iot?%s", req) == -1)
+    if (sscanf(uri, "%*[^i]iot?%s", req) == -1)
         return -1;
+    printf("%s\n", req);    // dbg
     if (!strcmp(req, "sensor")) {
-        sscanf(uri, "%siot", path);
-        sprintf(path, "%siot.db", path);
+        memset(response_head, 0, sizeof(response_head));
+        sprintf(response_head, response_ok_head);
+        sprintf(response_head, "%sContent-type: %s;charset=UTF-8\r\n", response_head, "text/plain");
+        sprintf(response_head, "%sCache-control: max-age=0\r\n", response_head);
+        if (!sensor_pushed) {
+            sprintf(response_head, "%sSensor-data: not updated\r\n", response_head);
+            // sprintf(response_head, "%sContent-length: %d\r\n\r\n", response_head, 0);
+            // return write(sock, response_head, strlen(response_head));
+        } else {
+            sensor_pushed = 0;
+            sprintf(response_head, "%sSensor-data: newest\r\n", response_head);
+        }
+        sscanf(uri, "%[^/]", path);
+        sprintf(path, "%s/iot.db", path);
+        printf("parsed path:%s\n", path);
         int fd = open(path, O_RDONLY, S_IREAD);
         if (fd < 0) {
-            fprintf(stderr, "%s", path);
+            fprintf(stderr, "open %s error.\n", path);
             return -1;
         }
-        int filesize = lseek(fd, 0, SEEK_END);
-        return send_file(fd, filesize, sock);
+        int filesize;
+        filesize = lseek(fd, 0, SEEK_END);
+        sprintf(response_head, "%sContent-length: %d\r\n\r\n", response_head, filesize);
+        if (ret = write(sock, response_head, strlen(response_head)) < 0) {
+            close(fd);
+            return ret;
+        }
+        printf("data path:%s\nsending data...",path);
+        ret += send_file(fd, filesize, sock);
+        close(fd);
+        return ret;
     }
+    if (!strcmp(req, "lighton")) {
+        memset(msg_reply_to_sensor, 0, sizeof(msg_reply_to_sensor));
+        sprintf(msg_reply_to_sensor, "lon\r\n\r\n");
+        order_reply_to_sensor = 1;
+        goto reply_200ok;
+    }
+    if (!strcmp(req, "lightoff")) {
+        memset(msg_reply_to_sensor, 0, sizeof(msg_reply_to_sensor));
+        sprintf(msg_reply_to_sensor, "loff\r\n\r\n");
+        order_reply_to_sensor = 1;
+        goto reply_200ok;
+    }
+    printf("dynamic_uri: do nothing.");
     return 0;
+reply_200ok:
+    memset(response_head, 0, sizeof(response_head));
+    sprintf(response_head, response_ok_head);
+    sprintf(response_head, "%sContent-type: %s;charset=UTF-8\r\n", response_head, "text/plain");
+    sprintf(response_head, "%sContent-length: %d\r\n", response_head, 0);
+    sprintf(response_head, "%sCache-control: max-age=0\r\n\r\n", response_head);
+    return write(sock, response_head, strlen(response_head));
 }
 
 static int static_server(int sock, char *uri, char *filetype)
@@ -294,7 +342,8 @@ static int static_server(int sock, char *uri, char *filetype)
         memset(response_head, 0, sizeof(response_head));
         sprintf(response_head, response_ok_head);
         sprintf(response_head, "%sContent-type: %s;charset=UTF-8\r\n", response_head, filetype);
-        sprintf(response_head, "%sContent-length: %d\r\n\r\n", response_head, filesize);
+        sprintf(response_head, "%sContent-length: %d\r\n", response_head, filesize);
+        sprintf(response_head, "%sCache-control: max-age=30\r\n\r\n", response_head);
         if (ret = write(sock, response_head, strlen(response_head)) < 0) {
             close(fd);
             return ret;
@@ -333,14 +382,42 @@ static int handle_http_request(int sock, char * msg)
     return send(sock, response_head, strlen(response_head), 0);
 }
 
-static int handle_message(int fd, char * msg)
+static int handle_message(int sock, char * msg)
 {
     fprintf(stdout, "handling message... ");
-    char method[STRING_SIZE], uri[STRING_SIZE], version[STRING_SIZE], buf[STRING_SIZE];
+    char method[STRING_SIZE], uri[STRING_SIZE], version[STRING_SIZE];
+    /** recv sensor data that starts with "IOT" and simply save at IOT/iot.db (for testing) **/
+    if (*msg == 'I' && *(msg+1) == 'O' && *(msg+2) == 'T') {
+        if (order_reply_to_sensor) {
+            sensor_pushed = 1;
+            order_reply_to_sensor = 0;
+            if (send(sock, msg_reply_to_sensor, strlen(msg_reply_to_sensor), 0) <= 0) {
+                perror("Error in sending msg to sensor controller.");
+                /* reserved */
+            }
+        }
+        int fd = open("IOT/iot.db", O_WRONLY | O_TRUNC);
+        if (fd < 0) 
+            return -1;
+        int n = write(fd, msg+3, strlen(msg)-3);
+        if (n == -1) {
+            perror("IOT write: error.\n");
+            close(fd);
+            return n;
+        }
+        if (n == 0) {
+            perror("IOT write: 0 byte.\n");
+            close(fd);
+            return n;
+        }
+        close(fd);
+        return n;
+    }
+    /** end sensor data **/
     sscanf(msg, "%s %s %s", method, uri, version);
     printf("%s %s %s...\n", method, uri, version);
     if (!strcmp(version, "HTTP/1.1"))
-        return handle_http_request(fd, msg);
+        return handle_http_request(sock, msg);
     return -1;
 }
 
