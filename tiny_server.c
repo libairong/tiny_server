@@ -367,10 +367,11 @@ static int handle_http_request(int sock, char * msg)
 #ifdef MULTI_CNAME_SERVICE
         parse_host(host, uri);
 #endif // MULTI_CNAME_SERVICE
-        if ( parse_http_uri(uri, filetype) ) { /* dynamic request */
+        int ret = parse_http_uri(uri, filetype);
+        if ( ret == 1 ) { /* dynamic request */
             return dynamic_uri(sock, uri);
         }
-        else { /* static request */
+        else if(ret == 0) { /* static request */
             return static_server(sock, uri, filetype);
         }
     }
