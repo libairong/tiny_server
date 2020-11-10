@@ -24,7 +24,15 @@
 #include <locale.h>
 
 #define MULTI_CNAME_SERVICE
+#define HOSTCONF_SIZE 4096
 
+#ifndef PTHREAD_CANCELED
+#define PTHREAD_CANCELED ((void *) -1)
+#endif
+
+#ifndef LC_CTYPE
+#define LC_CTYPE 0
+#endif
 
 #define STRING_SIZE 1024
 #define MAX_LISTEN  128  // n <= 128
@@ -73,7 +81,7 @@ static int send_file(int srcfd, int filesize, int sock)
 }
 
 #ifdef MULTI_CNAME_SERVICE
-static char g_host_binding_list[STRING_SIZE] = {0};
+static char g_host_binding_list[HOSTCONF_SIZE] = {0};
 
 static void filter_comment(char *src, int src_size, char *buf, int buf_size)
 {
@@ -114,10 +122,10 @@ static int parse_conf_from_file(int fd, char *buf, int size)
 
 static void host_list_init()
 {
-    int fd = open("/etc/tiny_server/host.conf", O_RDONLY, S_IREAD);
+    int fd = open("/etc/tiny_server/host.conf", O_RDONLY, S_IRUSR);
     if (fd < 0) {
         perror("/etc/tiny_server/host.conf");
-        fd = open("host.conf", O_RDONLY, S_IREAD);
+        fd = open("host.conf", O_RDONLY, S_IRUSR);
     }
     if (fd < 0) {
         perror("./host.conf");
@@ -136,7 +144,7 @@ static void parse_host(char *host, char *uri)
     s = strstr(g_host_binding_list, host);
     if (s != NULL && s != g_host_binding_list)
         do {
-            s = index(s, '\n');
+            s = strchr(s, '\n');
             if (!s)
                 break;
             s = strstr(s+1, host);
@@ -236,7 +244,7 @@ static int parse_http_uri(char *uri, char *filetype)
         perror("File does not exist or not allowed to read. Only normal files is readable.");
         return -1;
     }
-    char *p = rindex(uri, '.');
+    char *p = strrchr(uri, '.');
     if (!p) {
         fprintf(stdout, "file type doesn't exist, return file as text/plain.\n");
         strcpy(filetype, "text/plain");
@@ -287,7 +295,7 @@ static int dynamic_uri(int sock, char *uri)
         sscanf(uri, "%[^/]", path);
         sprintf(path, "%s/iot.db", path);
         printf("parsed path:%s\n", path);
-        int fd = open(path, O_RDONLY, S_IREAD);
+        int fd = open(path, O_RDONLY, S_IRUSR);
         if (fd < 0) {
             fprintf(stderr, "open %s error.\n", path);
             return -1;
@@ -332,7 +340,7 @@ static int static_server(int sock, char *uri, char *filetype)
     fprintf(stdout, "static request:%s\n", uri); // dbg msg
     int ret, fd, filesize;
     char response_head[STRING_SIZE];
-    fd = open(uri, O_RDONLY, S_IREAD);
+    fd = open(uri, O_RDONLY, S_IRUSR);
     if (fd < 0){
         perror("File does not exist or permmition diny.\n"); // dbg msg
         return fd;
